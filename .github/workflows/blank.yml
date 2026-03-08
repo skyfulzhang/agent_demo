@@ -1,4 +1,5 @@
 # This is a basic workflow to help you get started with Actions
+# This is a basic workflow to help you get started with Actions
 name: k6 Load Test
 
 on:
@@ -25,8 +26,35 @@ jobs:
         with:
           filename: script.js
 
-      - name: Upload HTML report
+      - name: Move reports to workspace     # ← 新增步骤
+        if: always()
+        run: |
+          echo "🔍 Searching for result.html and summary.json..."
+
+          for FILE in result.html summary.json; do
+            if [ -f "$GITHUB_WORKSPACE/$FILE" ]; then
+              echo "✅ $FILE already in workspace"
+            else
+              FOUND=$(find /home /root /tmp -name "$FILE" 2>/dev/null | head -1)
+              if [ -n "$FOUND" ]; then
+                cp "$FOUND" "$GITHUB_WORKSPACE/$FILE"
+                echo "✅ Copied $FILE from $FOUND"
+              else
+                echo "⚠️  $FILE not found, creating placeholder"
+                echo "<html><body><h1>$FILE not generated</h1></body></html>" > "$GITHUB_WORKSPACE/$FILE"
+              fi
+            fi
+          done
+
+          echo "📂 Workspace files:"
+          ls -lh "$GITHUB_WORKSPACE"/*.html "$GITHUB_WORKSPACE"/*.json 2>/dev/null || echo "No report files found"
+
+      - name: Upload reports                # ← 同时上传两个文件
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: k6-report
-          path: result.html
+          path: |
+            result.html
+            summary.json
+          retention-days: 30
