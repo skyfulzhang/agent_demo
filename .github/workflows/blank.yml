@@ -1,9 +1,14 @@
 # This is a basic workflow to help you get started with Actions
-name: k6 Performance Test
+name: k6 Load Test
 
 on:
+  push:
+    branches: [ main ]
+
   pull_request:
     branches: [ main ]
+
+  workflow_dispatch:
 
 jobs:
   loadtest:
@@ -12,9 +17,16 @@ jobs:
 
     steps:
 
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Run k6 Load Test
+      - name: Run k6
         uses: grafana/k6-action@v0.3.1
         with:
-          filename: loadtest.js
+          filename: script.js
+
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-report
+          path: result.html
