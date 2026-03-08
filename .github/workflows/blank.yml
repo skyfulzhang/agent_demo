@@ -9,12 +9,19 @@ on:
   pull_request:
     branches: [ master ]
 
+  schedule:
+    - cron: '0 4 * * 0'  # 每周日 UTC 04:00 = 北京时间 12:00
+
   workflow_dispatch:
 
 jobs:
   loadtest:
 
     runs-on: ubuntu-latest
+
+    # 需要写权限才能 git push 回仓库
+    permissions:
+      contents: write
 
     steps:
 
@@ -26,7 +33,7 @@ jobs:
         with:
           filename: script.js
 
-      - name: Move reports to workspace     # ← 新增步骤
+      - name: Move reports to workspace
         if: always()
         run: |
           echo "🔍 Searching for result.html and summary.json..."
@@ -49,7 +56,24 @@ jobs:
           echo "📂 Workspace files:"
           ls -lh "$GITHUB_WORKSPACE"/*.html "$GITHUB_WORKSPACE"/*.json 2>/dev/null || echo "No report files found"
 
-      - name: Upload reports                # ← 同时上传两个文件
+      - name: Commit reports to repository   # ← 核心：推送文件到仓库
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add result.html summary.json
+
+          # 只有文件有变化时才 commit，避免空提交报错
+          if git diff --cached --quiet; then
+            echo "⚠️  No changes to commit"
+          else
+            git commit -m "ci: update k6 report [skip ci]"
+            git push origin master
+            echo "✅ Reports committed and pushed to repository"
+          fi
+
+      - name: Upload reports as artifact (backup)
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -58,3 +82,5 @@ jobs:
             result.html
             summary.json
           retention-days: 30
+
+
