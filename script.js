@@ -29,7 +29,6 @@ export function handleSummary(data) {
 }
 
 export default function () {
-    // ✅ 使用环境变量，方便 Agent 动态传参
     const baseUrl = 'https://httpbin.org/get';
 
     const params = {
@@ -43,8 +42,8 @@ export default function () {
 
     check(res, {
         'GET - Status 200': (r) => r.status === 200,
-        'GET - Duration < 500ms': (r) => r.timings.duration < 500,  // ✅ 新增响应时间断言
+        'GET - Duration < 500ms': (r) => r.timings.duration < 500, 
     });
 
-    sleep(1); // ✅ 模拟真实用户间隔，避免过度压测
+    sleep(1); 
 }
