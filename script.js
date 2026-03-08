@@ -23,6 +23,7 @@ export const options = {
 export function handleSummary(data) {
     return {
         'result.html': htmlReport(data),
+        'summary.json': JSON.stringify(data),
         stdout: textSummary(data, { indent: ' ', enableColors: true })
     };
 }
