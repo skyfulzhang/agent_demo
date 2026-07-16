@@ -1,5 +1,3 @@
-# This is a basic workflow to help you get started with Actions
-# This is a basic workflow to help you get started with Actions
 name: k6 Load Test
 
 on:
@@ -14,25 +12,41 @@ on:
 
   workflow_dispatch:
 
+# 防止并发冲突：同一时间只允许一个工作流运行
+concurrency:
+  group: k6-loadtest
+  cancel-in-progress: true
+
 jobs:
   loadtest:
 
     runs-on: ubuntu-latest
 
-    # 需要写权限才能 git push 回仓库
     permissions:
       contents: write
 
     steps:
 
+      # ─────────────────────────────────────────
+      # Step 1: 检出代码
+      # ─────────────────────────────────────────
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          # 拉取完整历史，避免 push 时因浅克隆报错
+          fetch-depth: 0
 
+      # ─────────────────────────────────────────
+      # Step 2: 运行 k6 测试
+      # ─────────────────────────────────────────
       - name: Run k6
         uses: grafana/k6-action@v0.3.1
         with:
           filename: script.js
 
+      # ─────────────────────────────────────────
+      # Step 3: 收集报告文件到 workspace
+      # ─────────────────────────────────────────
       - name: Move reports to workspace
         if: always()
         run: |
@@ -48,39 +62,78 @@ jobs:
                 echo "✅ Copied $FILE from $FOUND"
               else
                 echo "⚠️  $FILE not found, creating placeholder"
-                echo "<html><body><h1>$FILE not generated</h1></body></html>" > "$GITHUB_WORKSPACE/$FILE"
+                if [ "$FILE" = "result.html" ]; then
+                  echo "<html><body><h1>result.html not generated</h1></body></html>" \
+                    > "$GITHUB_WORKSPACE/$FILE"
+                else
+                  echo '{"error":"summary.json not generated"}' \
+                    > "$GITHUB_WORKSPACE/$FILE"
+                fi
               fi
             fi
           done
 
-          echo "📂 Workspace files:"
-          ls -lh "$GITHUB_WORKSPACE"/*.html "$GITHUB_WORKSPACE"/*.json 2>/dev/null || echo "No report files found"
+          echo ""
+          echo "📂 Workspace report files:"
+          ls -lh "$GITHUB_WORKSPACE"/result.html \
+                 "$GITHUB_WORKSPACE"/summary.json 2>/dev/null \
+            || echo "No report files found"
 
-      - name: Commit reports to repository   # ← 核心：推送文件到仓库
+      # ─────────────────────────────────────────
+      # Step 4: 按时间戳归档，保留历史记录
+      # ─────────────────────────────────────────
+      - name: Archive reports with timestamp
         if: always()
+        run: |
+          TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
+          ARCHIVE_DIR="$GITHUB_WORKSPACE/reports/$TIMESTAMP"
+          mkdir -p "$ARCHIVE_DIR"
+
+          cp "$GITHUB_WORKSPACE/result.html"  "$ARCHIVE_DIR/result.html"
+          cp "$GITHUB_WORKSPACE/summary.json" "$ARCHIVE_DIR/summary.json"
+
+          echo "📁 Archived to: reports/$TIMESTAMP"
+          echo "ARCHIVE_DIR=reports/$TIMESTAMP" >> "$GITHUB_ENV"
+          echo "TIMESTAMP=$TIMESTAMP"           >> "$GITHUB_ENV"
+
+      # ─────────────────────────────────────────
+      # Step 5: 提交报告到仓库
+      #   - PR 事件跳过（fork 无写权限）
+      #   - push 前先 pull --rebase，避免冲突
+      # ─────────────────────────────────────────
+      - name: Commit reports to repository
+        if: always() && github.event_name != 'pull_request'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add result.html summary.json
+          # ① 拉取最新提交，避免 push 被拒绝
+          git pull --rebase origin master
 
-          # 只有文件有变化时才 commit，避免空提交报错
+          # ② 暂存最新报告（根目录）+ 归档目录
+          git add result.html summary.json
+          git add reports/
+
+          # ③ 只有文件有变化时才提交
           if git diff --cached --quiet; then
             echo "⚠️  No changes to commit"
           else
-            git commit -m "ci: update k6 report [skip ci]"
+            git commit -m "ci: update k6 report [$TIMESTAMP] [skip ci]"
             git push origin master
-            echo "✅ Reports committed and pushed to repository"
+            echo "✅ Reports committed and pushed"
+            echo "   → reports/$ARCHIVE_DIR"
           fi
 
-      - name: Upload reports as artifact (backup)
+      # ─────────────────────────────────────────
+      # Step 6: 上传制品（所有场景均可下载）
+      # ─────────────────────────────────────────
+      - name: Upload reports as artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: k6-report
+          name: k6-report-${{ env.TIMESTAMP }}
           path: |
             result.html
             summary.json
+            reports/
           retention-days: 30
-
-
