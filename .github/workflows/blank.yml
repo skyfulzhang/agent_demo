@@ -3,23 +3,18 @@ name: k6 Load Test
 on:
   push:
     branches: [ master ]
-
   pull_request:
     branches: [ master ]
-
   schedule:
-    - cron: '0 4 * * 0'  # 每周日 UTC 04:00 = 北京时间 12:00
-
+    - cron: '0 4 * * 0'
   workflow_dispatch:
 
-# 防止并发冲突：同一时间只允许一个工作流运行
 concurrency:
   group: k6-loadtest
   cancel-in-progress: true
 
 jobs:
   loadtest:
-
     runs-on: ubuntu-latest
 
     permissions:
@@ -27,26 +22,25 @@ jobs:
 
     steps:
 
-      # ─────────────────────────────────────────
+      # ────────────────────────────────────────
       # Step 1: 检出代码
-      # ─────────────────────────────────────────
+      # ────────────────────────────────────────
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          # 拉取完整历史，避免 push 时因浅克隆报错
           fetch-depth: 0
 
-      # ─────────────────────────────────────────
+      # ────────────────────────────────────────
       # Step 2: 运行 k6 测试
-      # ─────────────────────────────────────────
+      # ────────────────────────────────────────
       - name: Run k6
         uses: grafana/k6-action@v0.3.1
         with:
           filename: script.js
 
-      # ─────────────────────────────────────────
+      # ────────────────────────────────────────
       # Step 3: 收集报告文件到 workspace
-      # ─────────────────────────────────────────
+      # ────────────────────────────────────────
       - name: Move reports to workspace
         if: always()
         run: |
@@ -73,60 +67,70 @@ jobs:
             fi
           done
 
-          echo ""
           echo "📂 Workspace report files:"
           ls -lh "$GITHUB_WORKSPACE"/result.html \
                  "$GITHUB_WORKSPACE"/summary.json 2>/dev/null \
             || echo "No report files found"
 
-      # ─────────────────────────────────────────
-      # Step 4: 按时间戳归档，保留历史记录
-      # ─────────────────────────────────────────
+      # ────────────────────────────────────────
+      # Step 4: 按时间戳归档
+      # ────────────────────────────────────────
       - name: Archive reports with timestamp
         if: always()
         run: |
           TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
-          ARCHIVE_DIR="$GITHUB_WORKSPACE/reports/$TIMESTAMP"
-          mkdir -p "$ARCHIVE_DIR"
+          ARCHIVE_DIR="reports/$TIMESTAMP"
+          mkdir -p "$GITHUB_WORKSPACE/$ARCHIVE_DIR"
 
-          cp "$GITHUB_WORKSPACE/result.html"  "$ARCHIVE_DIR/result.html"
-          cp "$GITHUB_WORKSPACE/summary.json" "$ARCHIVE_DIR/summary.json"
+          cp "$GITHUB_WORKSPACE/result.html"  "$GITHUB_WORKSPACE/$ARCHIVE_DIR/result.html"
+          cp "$GITHUB_WORKSPACE/summary.json" "$GITHUB_WORKSPACE/$ARCHIVE_DIR/summary.json"
 
-          echo "📁 Archived to: reports/$TIMESTAMP"
-          echo "ARCHIVE_DIR=reports/$TIMESTAMP" >> "$GITHUB_ENV"
-          echo "TIMESTAMP=$TIMESTAMP"           >> "$GITHUB_ENV"
+          echo "📁 Archived to: $ARCHIVE_DIR"
 
-      # ─────────────────────────────────────────
-      # Step 5: 提交报告到仓库
-      #   - PR 事件跳过（fork 无写权限）
-      #   - push 前先 pull --rebase，避免冲突
-      # ─────────────────────────────────────────
+          # 写入环境变量供后续步骤使用
+          echo "ARCHIVE_DIR=$ARCHIVE_DIR" >> "$GITHUB_ENV"
+          echo "TIMESTAMP=$TIMESTAMP"     >> "$GITHUB_ENV"
+
+      # ────────────────────────────────────────
+      # Step 5: 提交报告到仓库（核心修复）
+      # ────────────────────────────────────────
       - name: Commit reports to repository
         if: always() && github.event_name != 'pull_request'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # ① 拉取最新提交，避免 push 被拒绝
-          git pull --rebase origin master
+          # ① 先暂存报告文件（必须在 pull 之前执行）
+          git add result.html summary.json reports/
 
-          # ② 暂存最新报告（根目录）+ 归档目录
-          git add result.html summary.json
-          git add reports/
-
-          # ③ 只有文件有变化时才提交
+          # ② 无变化则直接跳过
           if git diff --cached --quiet; then
             echo "⚠️  No changes to commit"
-          else
-            git commit -m "ci: update k6 report [$TIMESTAMP] [skip ci]"
-            git push origin master
-            echo "✅ Reports committed and pushed"
-            echo "   → reports/$ARCHIVE_DIR"
+            exit 0
           fi
 
-      # ─────────────────────────────────────────
-      # Step 6: 上传制品（所有场景均可下载）
-      # ─────────────────────────────────────────
+          # ③ stash 已暂存内容，让工作区变干净
+          git stash --include-untracked
+
+          # ④ 拉取远端最新（工作区干净，rebase 正常执行）
+          git pull --rebase origin master
+
+          # ⑤ 恢复报告文件
+          git stash pop
+
+          # ⑥ 重新暂存（stash pop 后状态重置）
+          git add result.html summary.json reports/
+
+          # ⑦ 提交 + 推送
+          git commit -m "ci: update k6 report [$TIMESTAMP] [skip ci]"
+          git push origin master
+
+          echo "✅ Reports committed and pushed"
+          echo "   → $ARCHIVE_DIR"
+
+      # ────────────────────────────────────────
+      # Step 6: 上传制品备份
+      # ────────────────────────────────────────
       - name: Upload reports as artifact
         if: always()
         uses: actions/upload-artifact@v4
