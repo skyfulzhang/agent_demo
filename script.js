@@ -46,7 +46,7 @@ export const options = {
 // 测试目标配置（主 + 备用）
 // ─────────────────────────────────────────
 const TARGETS = {
-  primary: 'https://httpbin.org/get',
+  primary: 'https://www.baidu.com/',
   backup1: 'https://httpbingo.org/get',    // httpbin 镜像
   backup2: 'https://postman-echo.com/get', // Postman 官方测试服务
 };
